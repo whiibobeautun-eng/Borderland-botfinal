@@ -1061,10 +1061,7 @@ const TICKET_CATEGORIES = {
 };
 
 // Commande /setuptickets
-client.application?.commands?.create({
-  name: 'setuptickets',
-  description: '[STAFF] Envoie le panneau de tickets dans ce salon',
-});
+
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
@@ -1198,7 +1195,9 @@ client.on('interactionCreate', async interaction => {
         .setColor(0xE24B4A)
         .setDescription(`Ticket **${channel.name}** fermé par <@${interaction.user.id}>`)
         .setTimestamp()
-      ]
+     new SlashCommandBuilder()
+  .setName('setuptickets')
+  .setDescription('[STAFF] Envoie le panneau de tickets dans ce salon'), ]
     });
   }
 
