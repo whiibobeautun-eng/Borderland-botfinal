@@ -304,7 +304,11 @@ const commands = [
     .setName('echanger')
     .setDescription('Propose un échange de cartes avec un autre joueur')
     .addUserOption(o => o.setName('joueur').setDescription('Le joueur avec qui échanger').setRequired(true)),
-];
+new SlashCommandBuilder()
+  .setName('setuptickets')
+  .setDescription('[STAFF] Envoie le panneau de tickets dans ce salon'), ]
+    });
+}];
 
 // ─── Déploiement des commandes ────────────────────────────────────────────────
 async function deployCommands(guildId) {
