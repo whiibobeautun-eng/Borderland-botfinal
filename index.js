@@ -1051,3 +1051,157 @@ http.createServer((req, res) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+// ─── SYSTÈME DE TICKETS ───────────────────────────────────────────────────────
+
+const TICKET_CATEGORIES = {
+  'ticket_jeu':    { label: '🎮 Jeu',    color: 0x3B8BD4 },
+  'ticket_report': { label: '⚠️ Report', color: 0xE85D24 },
+  'ticket_cartes': { label: '🃏 Cartes', color: 0xC8A84A },
+  'ticket_autre':  { label: '❓ Autre',  color: 0x888780 },
+};
+
+// Commande /setuptickets
+client.application?.commands?.create({
+  name: 'setuptickets',
+  description: '[STAFF] Envoie le panneau de tickets dans ce salon',
+});
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName !== 'setuptickets') return;
+  if (!isStaff(interaction.member)) {
+    return interaction.reply({ content: '❌ Staff uniquement.', ephemeral: true });
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle('🎫 Support — La Plage des Jeux')
+    .setColor(0xC8A84A)
+    .setDescription([
+      'Tu as un problème, un report ou une question ?',
+      'Clique sur le bouton ci-dessous pour ouvrir un ticket.',
+      '',
+      '🎮 **Jeu** — Problème pendant un jeu',
+      '⚠️ **Report** — Signaler un membre',
+      '🃏 **Cartes** — Réclamation de cartes',
+      '❓ **Autre** — Toute autre demande',
+    ].join('\n'))
+    .setFooter({ text: 'Alice in Borderland — La Plage des Jeux' });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('open_ticket')
+      .setLabel('🎫 Ouvrir un ticket')
+      .setStyle(ButtonStyle.Primary),
+  );
+
+  await interaction.reply({ embeds: [embed], components: [row] });
+});
+
+// Bouton ouvrir ticket
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isButton()) return;
+  if (interaction.customId !== 'open_ticket') return;
+
+  const guild = interaction.guild;
+  const member = interaction.member;
+
+  // Vérifie si le membre a déjà un ticket ouvert
+  const existing = guild.channels.cache.find(
+    c => c.name === `ticket-${member.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}` 
+  );
+  if (existing) {
+    return interaction.reply({ 
+      content: `❌ Tu as déjà un ticket ouvert : <#${existing.id}>`, 
+      ephemeral: true 
+    });
+  }
+
+  // Crée le salon privé
+  const ticketChannel = await guild.channels.create({
+    name: `ticket-${member.user.username.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
+    type: 0,
+    permissionOverwrites: [
+      { id: guild.roles.everyone, deny: ['ViewChannel'] },
+      { id: member.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
+      ...guild.roles.cache
+        .filter(r => ['Chapelier', 'Maître du Jeu', 'Garde de la Plage'].some(n => r.name.includes(n)))
+        .map(r => ({ id: r.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] })),
+    ],
+  });
+
+  // Message de bienvenue avec catégories
+  const welcomeEmbed = new EmbedBuilder()
+    .setTitle('🎫 Ticket ouvert')
+    .setColor(0xC8A84A)
+    .setDescription(`Bienvenue <@${member.id}> !\nDécris ton problème, le staff reviendra vers toi.\n\n**Choisis une catégorie :**`)
+    .setFooter({ text: 'Alice in Borderland — La Plage des Jeux' })
+    .setTimestamp();
+
+  const catRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('ticket_jeu').setLabel('🎮 Jeu').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('ticket_report').setLabel('⚠️ Report').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('ticket_cartes').setLabel('🃏 Cartes').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('ticket_autre').setLabel('❓ Autre').setStyle(ButtonStyle.Secondary),
+  );
+
+  const closeRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`close_ticket_${ticketChannel.id}`)
+      .setLabel('🔒 Fermer le ticket')
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  await ticketChannel.send({ embeds: [welcomeEmbed], components: [catRow, closeRow] });
+  await interaction.reply({ content: `✅ Ton ticket a été créé : <#${ticketChannel.id}>`, ephemeral: true });
+});
+
+// Boutons catégorie ticket
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isButton()) return;
+  if (!Object.keys(TICKET_CATEGORIES).includes(interaction.customId)) return;
+
+  const cat = TICKET_CATEGORIES[interaction.customId];
+  await interaction.update({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle(`${cat.label} — Ticket ouvert`)
+        .setColor(cat.color)
+        .setDescription(`Catégorie sélectionnée : **${cat.label}**\nDécris ton problème en détail, le staff arrive !`)
+        .setTimestamp()
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`close_ticket_${interaction.channel.id}`)
+          .setLabel('🔒 Fermer le ticket')
+          .setStyle(ButtonStyle.Danger),
+      )
+    ],
+  });
+});
+
+// Fermeture ticket
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isButton()) return;
+  if (!interaction.customId.startsWith('close_ticket_')) return;
+
+  const channelId = interaction.customId.replace('close_ticket_', '');
+  const channel = interaction.guild.channels.cache.get(channelId);
+  if (!channel) return;
+
+  // Log dans #logs-modération
+  const logsChannel = interaction.guild.channels.cache.find(c => c.name === 'logs-modération');
+  if (logsChannel) {
+    await logsChannel.send({
+      embeds: [new EmbedBuilder()
+        .setTitle('🔒 Ticket fermé')
+        .setColor(0xE24B4A)
+        .setDescription(`Ticket **${channel.name}** fermé par <@${interaction.user.id}>`)
+        .setTimestamp()
+      ]
+    });
+  }
+
+  await interaction.reply({ content: '🔒 Ticket fermé, suppression dans 5 secondes...' });
+  setTimeout(() => channel.delete().catch(() => {}), 5000);
+});
